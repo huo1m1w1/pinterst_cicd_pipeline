@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+    Description: EC2 instance type (default: t2.micro)
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket to create
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      AccessControl: Private
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref S3AccessRole
+
+  S3AccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub 'arn:aws:s3:::${BucketName}'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${BucketName}/*'
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref pins.pem
+      ImageId: ami-0c94855ba95c71c99  # Amazon Linux 2 LTS
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "export PATH=/usr/local/bin:$PATH;" >> /home/ec2-user/.bashrc
+          sudo yum update -y 
+          sudo yum upgrade -y
+            
+          # install docker engine
+          sudo amazon-linux-extras install docker -y
+          sudo service docker start
+          sudo systemctl enable docker
+          sudo usermod -a -G docker ec2-user
+            
+          # instal docker-compose
+          sudo wget https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)
+          sudo mv docker-compose-$(uname -s)-$(uname -m) /usr/local/bin/docker-compose
+          sudo chmod -v +x /usr/local/bin/docker-compose
+            
+          # install wget
+          sudo yum install wget -y
+            
+          # install git
+          sudo yum install git -y
+            
+          # Install java
+          sudo wget https://javadl.oracle.com/webapps/download/AutoDL?BundleId=243712_61ae65e088624f5aaa0b1d2d801acb16
+          sudo tar -xvf AutoDL?BundleId=243712_61ae65e088624f5aaa0b1d2d801acb16 -C /home/ec2-user/ --remove-files
+          sudo mv /home/ec2-user/jdk1.8.0_271 /home/ec2-user/java
+          sudo rm -f AutoDL?BundleId
